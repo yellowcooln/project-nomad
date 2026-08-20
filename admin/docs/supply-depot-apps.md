@@ -287,9 +287,11 @@ A browser-based client for [MeshCore](https://meshcore.io) radios. MeshCore is a
 
 An open-source MeshCore repeater and management service with a full local web interface. It can route mesh traffic, manage the repeater identity and radio settings, expose statistics and logs, and connect to a supported radio modem without depending on a cloud service.
 
-**Official site:** [openhop.dev](https://openhop.dev) · **Source:** [github.com/openhop-dev/openhop_repeater](https://github.com/openhop-dev/openhop_repeater)
+**Official site:** [openhop.dev](https://openhop.dev) · **Flasher:** [flasher.openhop.dev](https://flasher.openhop.dev) · **Source:** [github.com/openhop-dev/openhop_repeater](https://github.com/openhop-dev/openhop_repeater)
 
 **First time you open it:** openHop starts in its setup wizard. Create the administrator credentials and review the node settings there. NOMAD deliberately does not install the shared example passwords that appear in generic development configurations.
+
+**Radio hardware:** openHop Repeater needs an openHop Modem running on a supported device. Use [flasher.openhop.dev](https://flasher.openhop.dev) to install the openHop Modem firmware, then connect that device to your NOMAD over USB or to the same local network for TCP operation.
 
 **Safe starting state:** The Supply Depot installation opens with the radio disabled and `no_tx` mode selected. This gives you time to finish the identity, modem, region, and radio settings before enabling mesh traffic.
 
