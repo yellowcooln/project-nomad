@@ -282,3 +282,23 @@ A browser-based client for [MeshCore](https://meshcore.io) radios. MeshCore is a
 **Your data:** There's nothing to set up or store on your NOMAD for this app. Your radio's settings live on the radio itself, and the app's preferences live in your browser. There's no NOMAD folder to manage.
 
 **Works offline:** Fully offline, which is the whole point of MeshCore. The app is served from your NOMAD and talks to your radio directly over USB or Bluetooth, never the internet.
+
+## openHop Repeater {% #openhop-repeater %}
+
+An open-source MeshCore repeater and management service with a full local web interface. It can route mesh traffic, manage the repeater identity and radio settings, expose statistics and logs, and connect to a supported radio modem without depending on a cloud service.
+
+**Official site:** [openhop.dev](https://openhop.dev) · **Source:** [github.com/openhop-dev/openhop_repeater](https://github.com/openhop-dev/openhop_repeater)
+
+**First time you open it:** openHop starts in its setup wizard. Create the administrator credentials and review the node settings there. NOMAD deliberately does not install the shared example passwords that appear in generic development configurations.
+
+**Safe starting state:** The Supply Depot installation opens with the radio disabled and `no_tx` mode selected. This gives you time to finish the identity, modem, region, and radio settings before enabling mesh traffic.
+
+**Using a USB modem:** Plug the openHop/pyMC USB modem into the NOMAD itself, then select `pymc_usb` in openHop's radio configuration. USB serial devices are available inside the app under `/host/dev`. Prefer the stable path under `/host/dev/serial/by-id/` when your modem provides one; `/host/dev/ttyACM0` or `/host/dev/ttyUSB0` also works when that is how Linux identifies it. The normal pyMC USB baud rate is `921600`.
+
+**Using a network modem:** For an openHop/pyMC TCP modem on the same LAN, select `pymc_tcp`, enter the modem's LAN IP address, port (normally `5055`), and its token if one is configured. Prefer a reserved IP address or normal local DNS name; `.local`/mDNS names do not always resolve from inside Docker containers.
+
+Before enabling forwarding, verify the antenna, region, frequency, bandwidth, spreading factor, coding rate, preamble, and transmit power for the attached radio. Use `no_tx` or monitor mode while checking the connection.
+
+**Your data:** Configuration and identity material live in `storage/openhop-repeater/config`. Packet history, metrics, and other runtime data live in `storage/openhop-repeater/data`. Back up both folders together. The configuration can contain identity keys, modem tokens, and other secrets, so protect the backup like a password vault and do not post it in support logs.
+
+**Works offline:** The repeater, web interface, local modem connection, statistics, and configuration work on the local network without internet access. Optional services you configure yourself, such as remote MQTT brokers, OIDC providers, or update checks, naturally need access to those endpoints.
