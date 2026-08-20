@@ -1,6 +1,10 @@
 export const OPENHOP_REPEATER_IMAGE = 'openhop/openhop-repeater:v1.1.2.dev220'
 export const OPENHOP_REPEATER_HOST_PORT = '8510'
 export const OPENHOP_REPEATER_CONTAINER_PORT = '8000/tcp'
+export const OPENHOP_REPEATER_USB_VOLUME = {
+  host_path: '/dev',
+  container_path: '/host/dev',
+}
 
 export function buildOpenHopRepeaterContainerConfig(storageRoot: string) {
   return {
@@ -14,7 +18,7 @@ export function buildOpenHopRepeaterContainerConfig(storageRoot: string) {
         `${storageRoot}/openhop-repeater/data:/var/lib/openhop_repeater`,
         // Keep the host device tree at a separate path so the container's own /dev remains intact.
         // Cgroup rules below grant access only to Linux CDC ACM (166) and USB serial (188) devices.
-        '/dev:/host/dev',
+        `${OPENHOP_REPEATER_USB_VOLUME.host_path}:${OPENHOP_REPEATER_USB_VOLUME.container_path}`,
       ],
       DeviceCgroupRules: ['c 166:* rwm', 'c 188:* rwm'],
     },

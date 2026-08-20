@@ -30,10 +30,13 @@ import {
   DEFAULT_MEMORY_MB,
   evaluateCustomApp,
 } from '#services/custom_app_guard'
+import { selectVolumesForEditGuard } from '#services/app_edit_guard'
+import { OPENHOP_REPEATER_USB_VOLUME } from '../../constants/openhop_repeater.js'
 import { inject } from '@adonisjs/core'
 import type { HttpContext } from '@adonisjs/core/http'
 import logger from '@adonisjs/core/services/logger'
 import Service from '#models/service'
+import { SERVICE_NAMES } from '../../constants/service_names.js'
 
 @inject()
 export default class SystemController {
@@ -355,7 +358,13 @@ export default class SystemController {
         const portConflicts = payload.exclude_service
             ? conflicts.filter((c) => c.usedBy !== payload.exclude_service)
             : conflicts
-        const guard = evaluateCustomApp({ image: payload.image, volumes: payload.volumes })
+        const editedService = payload.exclude_service
+            ? await Service.query().where('service_name', payload.exclude_service).first()
+            : null
+        const volumesForGuard = editedService
+            ? this.selectEditVolumesForGuard(editedService, payload.volumes)
+            : payload.volumes
+        const guard = evaluateCustomApp({ image: payload.image, volumes: volumesForGuard })
         return response.send({
             portConflicts,
             resourceWarnings: [...resourceWarnings, ...guard.warnings],
@@ -618,8 +627,12 @@ export default class SystemController {
             })
         }
 
-        // Security guardrails (same posture as create).
-        const guard = evaluateCustomApp({ image: payload.image, volumes: payload.volumes })
+        // Security guardrails (same posture as create). A curated app may retain only the exact
+        // trusted system bind that its catalog definition supplied; changed/new system binds remain blocked.
+        const guard = evaluateCustomApp({
+            image: payload.image,
+            volumes: this.selectEditVolumesForGuard(service, payload.volumes),
+        })
         if (guard.blocked.length) {
             return response.status(422).send({ success: false, message: guard.blocked.join(' '), blocked: guard.blocked })
         }
@@ -773,6 +786,21 @@ export default class SystemController {
         const firstHostPort = payload.ports?.[0]?.host
         const uiLocation = firstHostPort ? String(firstHostPort) : null
         return { containerConfig, uiLocation }
+    }
+
+    private selectEditVolumesForGuard(
+        service: Service,
+        proposed?: { host_path: string; container_path: string }[]
+    ) {
+        const trustedInherited =
+            !service.is_custom && service.service_name === SERVICE_NAMES.OPENHOP_REPEATER
+                ? [OPENHOP_REPEATER_USB_VOLUME]
+                : []
+        return selectVolumesForEditGuard({
+            proposed,
+            existing: trustedInherited,
+            isCustom: service.is_custom,
+        })
     }
 
     /** Inverse of buildCustomContainerConfig: turn a stored Service into the editable form-shape. */
