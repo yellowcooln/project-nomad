@@ -293,9 +293,9 @@ An open-source MeshCore repeater and management service with a full local web in
 
 **Safe starting state:** The Supply Depot installation opens with the radio disabled and `no_tx` mode selected. This gives you time to finish the identity, modem, region, and radio settings before enabling mesh traffic.
 
-**Using a USB modem:** Plug the openHop/pyMC USB modem into the NOMAD itself, then select `pymc_usb` in openHop's radio configuration. USB serial devices are available inside the app under `/host/dev`. Prefer the stable path under `/host/dev/serial/by-id/` when your modem provides one; `/host/dev/ttyACM0` or `/host/dev/ttyUSB0` also works when that is how Linux identifies it. The normal pyMC USB baud rate is `921600`.
+**Using a USB modem:** Plug the openHop Modem into the NOMAD itself, then select `pymc_usb` in openHop's radio configuration. USB serial devices are available inside the app under `/host/dev`. Prefer the stable path under `/host/dev/serial/by-id/` when your modem provides one; `/host/dev/ttyACM0` or `/host/dev/ttyUSB0` also works when that is how Linux identifies it. The normal openHop Modem USB baud rate is `921600`.
 
-**Using a network modem:** For an openHop/pyMC TCP modem on the same LAN, select `pymc_tcp`, enter the modem's LAN IP address, port (normally `5055`), and its token if one is configured. Prefer a reserved IP address or normal local DNS name; `.local`/mDNS names do not always resolve from inside Docker containers.
+**Using a network modem:** For an openHop Modem on the same LAN, select `pymc_tcp`, enter the modem's LAN IP address, port (normally `5055`), and its token if one is configured. Prefer a reserved IP address or normal local DNS name; `.local`/mDNS names do not always resolve from inside Docker containers.
 
 Before enabling forwarding, verify the antenna, region, frequency, bandwidth, spreading factor, coding rate, preamble, and transmit power for the attached radio. Use `no_tx` or monitor mode while checking the connection.
 
