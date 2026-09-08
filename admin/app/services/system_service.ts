@@ -21,7 +21,9 @@ import env from '#start/env'
 import KVStore from '#models/kv_store'
 import { KV_STORE_SCHEMA, KVStoreKey } from '../../types/kv_store.js'
 import { isNewerVersion } from '../utils/version.js'
+import { isUnresolvedGpuModel } from '../utils/gpu_model.js'
 import { invalidateAssistantNameCache } from '../../config/inertia.js'
+import { invalidateMinRelevanceCache } from '../utils/rag_relevance.js'
 import { KiwixLibraryService } from '#services/kiwix_library_service'
 
 @inject()
@@ -341,6 +343,8 @@ export class SystemService {
         'is_custom',
         'is_user_modified',
         'is_deprecated',
+        'is_link_tile',
+        'link_color',
         'category'
       )
       .where('is_dependency_service', false)
@@ -381,6 +385,8 @@ export class SystemService {
         is_custom: service.is_custom,
         is_user_modified: service.is_user_modified,
         is_deprecated: service.is_deprecated,
+        is_link_tile: service.is_link_tile,
+        link_color: service.link_color,
         category: service.category,
       })
     }
@@ -500,12 +506,31 @@ export class SystemService {
           }
         }
 
-        // Run the probes when controllers are empty (common inside Docker) or
-        // when lspci gave us bogus discrete-GPU BAR0 values that need replacing.
+        // The same pci.ids staleness that produces bogus VRAM also produces a
+        // placeholder model name — a card newer than the container's pci.ids is
+        // reported as its raw id, e.g. "Device 2d05" for an RTX 5060 (#1165).
+        //
+        // These are independent symptoms, not one. lspci can hand back a
+        // perfectly plausible BAR0 reading alongside an unresolved name, and in
+        // that case nothing above fires, no probe runs, and Settings > System
+        // renders the raw PCI id as the GPU model (#1196). NVIDIA usually hides
+        // this because the nvidia-smi path tends to be reached for other
+        // reasons; AMD has no equivalent, so it shows the raw id.
+        //
+        // The probes below resolve a real name from Ollama's own startup log,
+        // so trigger them on an unresolved name too rather than only on VRAM.
+        const hasUnresolvedGpuName = (graphics.controllers || []).some((c) =>
+          isUnresolvedGpuModel(c.model || '')
+        )
+
+        // Run the probes when controllers are empty (common inside Docker),
+        // when lspci gave us bogus discrete-GPU BAR0 values that need replacing,
+        // or when it named a card it couldn't resolve.
         if (
           !graphics.controllers ||
           graphics.controllers.length === 0 ||
-          hasLspciBogusDgpuVram
+          hasLspciBogusDgpuVram ||
+          hasUnresolvedGpuName
         ) {
           const runtimes = dockerInfo.Runtimes || {}
           gpuHealth.hasNvidiaRuntime = 'nvidia' in runtimes
@@ -920,6 +945,9 @@ export class SystemService {
     if (key === 'ai.assistantCustomName') {
       invalidateAssistantNameCache()
     }
+    if (key === 'rag.minRelevance') {
+      invalidateMinRelevanceCache()
+    }
     // Re-enabling auto-update after a backoff-driven auto-disable clears the
     // failure state so it gets a fresh start instead of immediately re-tripping.
     if (key === 'autoUpdate.enabled' && (value === true || value === 'true')) {
@@ -960,6 +988,12 @@ export class SystemService {
       const serviceStatusList = await this.dockerService.getServicesStatus()
 
       for (const service of allServices) {
+        // Link tiles are shortcuts with no container behind them, so container
+        // reconciliation does not apply: they are always "installed" in the only
+        // sense that matters, which is that the dashboard should show them.
+        // Without this they are marked not-installed on the next sync and vanish.
+        if (service.is_link_tile) continue
+
         const containerExists = serviceStatusList.find(
           (s) => s.service_name === service.service_name
         )

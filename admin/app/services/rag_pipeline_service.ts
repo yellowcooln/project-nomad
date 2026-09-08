@@ -14,11 +14,13 @@ import {
   SYSTEM_PROMPTS,
 } from '../../constants/ollama.js'
 import type { OllamaChatMessage } from '../../types/ollama.js'
-import type { PipelineOptions, PipelineTrace, RetrievedChunk } from '../../types/rag.js'
+import type { PipelineOptions, PipelineTrace, RetrievalFloorStats, RetrievedChunk } from '../../types/rag.js'
 import { planPrompt } from '../utils/context_budget.js'
 import { estimateMessagesTokens } from '../utils/token_estimate.js'
+import { resolveMinFinalScore } from '../utils/rag_relevance.js'
 import { resolveTasksModel } from '../utils/tasks_model.js'
 import { buildContextBlock, getContextLimitsForModel } from '../utils/rag_prompt.js'
+import { QUERIES_SCHEMA, pickQueries, resolveStructured } from '../utils/structured_output.js'
 
 /**
  * Everything that happens between "a user sent a message" and "a payload goes
@@ -103,6 +105,8 @@ export class RagPipelineService {
       numPredict: undefined,
       contextLimits: { maxResults: RAG_DEFAULT_TOP_K, maxTokens: 0 },
       timings: { rewriteMs: 0, retrievalMs: 0 },
+      minFinalScore: 0,
+      chunksBelowFloor: 0,
     }
 
     // --- Retrieval -------------------------------------------------------
@@ -130,16 +134,28 @@ export class RagPipelineService {
 
       if (retrievalQuery) {
         const retrievalStart = Date.now()
+        // An explicit option always wins, so the eval harness never inherits
+        // whatever this machine's `rag.minRelevance` slider happens to be set to.
+        const minFinalScore = opts.minFinalScore ?? (await resolveMinFinalScore())
+        const floor: RetrievalFloorStats = { candidates: 0, belowFloor: 0 }
         relevantDocs = await this.ragService.searchSimilarDocuments(
           retrievalQuery,
           opts.topK ?? RAG_DEFAULT_TOP_K,
           opts.scoreThreshold ?? RAG_DEFAULT_SCORE_THRESHOLD,
-          opts.collection
+          opts.collection,
+          undefined,
+          minFinalScore,
+          floor
         )
         trace.timings.retrievalMs = Date.now() - retrievalStart
         trace.retrieved = relevantDocs
+        trace.minFinalScore = minFinalScore
+        trace.chunksBelowFloor = floor.belowFloor
         logger.debug(
-          `[RAG] Retrieved ${relevantDocs.length} relevant documents for query: "${retrievalQuery}"`
+          `[RAG] Retrieved ${relevantDocs.length} relevant documents for query: "${retrievalQuery}"` +
+            (floor.belowFloor > 0
+              ? ` (${floor.belowFloor} of ${floor.candidates} dropped below the ${minFinalScore} relevance floor)`
+              : '')
         )
       }
     }
@@ -278,9 +294,28 @@ export class RagPipelineService {
         temperature: 0,
         think: false,
         thinkingCapable,
+        // Grammar-constrained on the native transport. An array rather than a bare
+        // string because multi-query fusion then costs a prompt change and nothing
+        // else; only the first entry is used today.
+        format: QUERIES_SCHEMA,
       })
 
-      const rewrittenQuery = response.message.content.trim()
+      const raw = response.message.content.trim()
+      const structured = resolveStructured(raw, pickQueries, response.structured === true)
+      if (!structured.ok && structured.reason === 'constrained-parse-failed') {
+        // The grammar was applied and the output still didn't parse, which here means a
+        // rewrite truncated mid-object by QUERY_REWRITE_MAX_TOKENS. `raw` is a JSON
+        // fragment: embedding it would send the brace and the schema key to Qdrant as
+        // if they were the question. Losing the rewrite for this turn is the cheaper
+        // failure, so take the same path as a rewrite that produced nothing at all.
+        logger.warn(
+          `[RAG] Model "${rewriteModel}" broke the query grammar; falling back to the user message`
+        )
+        return { query: lastUserMessage?.content ?? null, didRewrite: false }
+      }
+      // Unconstrained backends never had the grammar applied, so the raw text is the
+      // rewrite and the old bare-string behaviour is still correct.
+      const rewrittenQuery = structured.ok ? structured.value[0] : raw
       // Empty means the response was reasoning and nothing else (or was truncated
       // mid-thought). Embedding an empty string would search the corpus for nothing
       // and quietly poison retrieval for the rest of the conversation, so fall back

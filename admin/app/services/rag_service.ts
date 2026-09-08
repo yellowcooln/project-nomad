@@ -22,7 +22,8 @@ import { decideScanAction, type IngestPolicy } from '../utils/kb_ingest_decision
 import { decideContentReindex, type ReindexOutcome } from '../utils/content_reindex_decision.js'
 import KbRatioRegistry from '#models/kb_ratio_registry'
 import { decideWarnings } from '../utils/kb_warning_decision.js'
-import type { FileWarning, FileWarningsResult, RetrievalStages, StoredFileInfo } from '../../types/rag.js'
+import type { FileWarning, FileWarningsResult, RetrievalFloorStats, RetrievalStages, StoredFileInfo } from '../../types/rag.js'
+import { applyRelevanceFloor } from '../utils/misc.js'
 import { KB_EVAL_COLLECTION } from '../../constants/kb_collections.js'
 
 /**
@@ -37,6 +38,7 @@ const EXCLUDE_EVAL_FILTER = {
 import type { KbIngestStateValue } from '../../types/kb_ingest_state.js'
 import { ZIMExtractionService } from './zim_extraction_service.js'
 import { ZIM_BATCH_SIZE } from '../../constants/zim_extraction.js'
+import { hasMoreArticleBatches } from '../utils/zim_batch_decision.js'
 import { EMBEDDING_MODEL_NAME } from '../../constants/ollama.js'
 import { ProcessAndEmbedFileResponse, ProcessZIMFileResponse, RAGResult, RerankedRAGResult } from '../../types/rag.js'
 
@@ -556,10 +558,14 @@ export class RagService {
       `[RAG] Extracting ZIM content (batch: offset=${startOffset}, size=${ZIM_BATCH_SIZE})`
     )
 
-    const { chunks: zimChunks, totalArticles } = await zimExtractionService.extractZIMContent(
-      filepath,
-      { startOffset, batchSize: ZIM_BATCH_SIZE }
-    )
+    const {
+      chunks: zimChunks,
+      totalArticles,
+      articlesProcessed,
+    } = await zimExtractionService.extractZIMContent(filepath, {
+      startOffset,
+      batchSize: ZIM_BATCH_SIZE,
+    })
 
     logger.info(
       `[RAG] Extracted ${zimChunks.length} chunks from ZIM file with enhanced metadata (file totalArticles=${totalArticles})`
@@ -610,15 +616,19 @@ export class RagService {
       }
     }
 
-    // Count unique articles processed in this batch. hasMoreBatches gates on the article
-    // count — zimChunks.length counts section-level chunks (multiple per article under the
-    // 'structured' strategy), so comparing it to ZIM_BATCH_SIZE (an article limit) caps
-    // processing at the first batch for any real archive.
-    const articlesInBatch = new Set(zimChunks.map((c) => c.documentId)).size
-    const hasMoreBatches = articlesInBatch >= ZIM_BATCH_SIZE
+    // Gate the continuation on articles the extractor CONSUMED, not on articles that
+    // produced chunks. Articles whose text is empty after cleaning (redirect stubs,
+    // category pages, media/PDF wrappers) contribute no documentIds, so a chunk-derived
+    // count reads a normal sparse batch as end-of-archive and silently abandons the rest
+    // of the file. See `zim_batch_decision.ts` for the full rationale.
+    const articlesWithContent = new Set(zimChunks.map((c) => c.documentId)).size
+    const hasMoreBatches = hasMoreArticleBatches({
+      articlesProcessed,
+      batchSize: ZIM_BATCH_SIZE,
+    })
 
     logger.info(
-      `[RAG] Successfully embedded ${totalChunks} total chunks from ${articlesInBatch} articles (hasMore: ${hasMoreBatches})`
+      `[RAG] Successfully embedded ${totalChunks} total chunks from ${articlesWithContent}/${articlesProcessed} articles (hasMore: ${hasMoreBatches})`
     )
 
     // Only delete the file when:
@@ -640,7 +650,11 @@ export class RagService {
         : 'ZIM file processed and embedded successfully with enhanced metadata.',
       chunks: totalChunks,
       hasMoreBatches,
-      articlesProcessed: articlesInBatch,
+      // MUST be the consumed count: EmbedFileJob advances the next batch offset by this
+      // value. Reporting the content-bearing count instead re-reads the overlap on every
+      // sparse batch, and a batch that yields no text at all would advance the offset by
+      // zero and re-run the same window forever.
+      articlesProcessed,
       totalArticles,
     }
   }
@@ -849,6 +863,7 @@ export class RagService {
    * @param query - The search query text
    * @param limit - Maximum number of results to return (default: 5)
    * @param scoreThreshold - Minimum similarity score threshold (default: 0.3, much lower than before)
+   * @param minFinalScore - Post-rerank relevance floor; below it a chunk is dropped
    * @returns Array of relevant text chunks with their scores
    */
   public async searchSimilarDocuments(
@@ -863,7 +878,15 @@ export class RagService {
      * changes — and it is what lets the eval harness answer "is the reranking
      * heuristic actually helping?" without a second implementation of search.
      */
-    stagesOut?: RetrievalStages
+    stagesOut?: RetrievalStages,
+    /**
+     * Relevance floor on the post-rerank score. Defaults to 0 so the parameter
+     * is purely additive for callers that predate it; the chat pipeline and the
+     * eval harness both pass a real value.
+     */
+    minFinalScore: number = 0,
+    /** Optional sink for the floor's counts; see RetrievalFloorStats. */
+    floorOut?: RetrievalFloorStats
   ): Promise<Array<{ text: string; score: number; metadata?: Record<string, any> }>> {
     try {
       logger.debug(`[RAG] Starting similarity search for query: "${query}"`)
@@ -956,6 +979,11 @@ export class RagService {
         document_id: result.payload?.document_id as string | undefined,
         content_type: result.payload?.content_type as string | undefined,
         source: result.payload?.source as string | undefined,
+        // Citation metadata (#1179) -- date/title of the archive a chunk was
+        // extracted from, when known. Undefined for non-ZIM content, which
+        // carries no equivalent embedded metadata.
+        archive_title: result.payload?.archive_title as string | undefined,
+        archive_date: result.payload?.archive_date as string | undefined,
       }))
 
       const rerankedResults = this.rerankResults(resultsWithMetadata, keywords, query)
@@ -967,12 +995,44 @@ export class RagService {
         )
       })
 
+      // Relevance floor, applied here — after reranking, before diversity.
+      //
+      // The ordering is deliberate. The floor is a judgement about relevance,
+      // and the reranked score is where that judgement is best informed. The
+      // diversity penalty that follows is about redundancy, not relevance: it
+      // multiplies by 0.85^n, so flooring afterwards would drop the fourth chunk
+      // of the one document that actually answers the question and blame a knob
+      // labelled "relevance" for it.
+      const { survivors, belowFloor } = applyRelevanceFloor(rerankedResults, minFinalScore)
+      if (floorOut) {
+        floorOut.candidates = rerankedResults.length
+        floorOut.belowFloor = belowFloor
+      }
+      if (belowFloor > 0) {
+        logger.debug(
+          `[RAG] Relevance floor ${minFinalScore}: dropped ${belowFloor} of ${rerankedResults.length} chunk(s)`
+        )
+      }
+      if (survivors.length === 0 && rerankedResults.length > 0) {
+        // Nothing cleared the bar. Returning empty is the point: the pipeline
+        // then injects no context block at all, rather than handing the model
+        // passages it has to be talked out of using.
+        logger.debug(
+          `[RAG] Nothing cleared the relevance floor (best was ${rerankedResults[0].finalScore.toFixed(4)}) — injecting no context`
+        )
+      }
+
       // Apply source diversity penalty to avoid all results from the same document
-      const diverseResults = this.applySourceDiversity(rerankedResults)
+      const diverseResults = this.applySourceDiversity(survivors)
 
       // Record the three ranked lists for the eval harness's stage ablation.
       // Sliced to `limit` so each stage is compared on the window that would
       // actually have been injected, not on the wider rerank candidate pool.
+      //
+      // `reranked` is recorded pre-floor on purpose: the ablation asks whether
+      // each heuristic *orders* better, and a filter applied to two of the three
+      // lists would answer a different question. The floor's own effect is
+      // measured by sweeping --min-final-score against the headline metrics.
       if (stagesOut) {
         const summarize = (rows: Array<{ text: string; score: number; source?: string }>) =>
           rows.slice(0, limit).map((r) => ({ source: r.source, score: r.score }))
@@ -1004,6 +1064,9 @@ export class RagService {
           hierarchy: result.hierarchy,
           document_id: result.document_id,
           content_type: result.content_type,
+          // Citation metadata (#1179)
+          archive_title: result.archive_title,
+          archive_date: result.archive_date,
         },
       }))
     } catch (error) {

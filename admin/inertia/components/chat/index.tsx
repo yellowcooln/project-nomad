@@ -7,7 +7,7 @@ import StyledModal from '../StyledModal'
 import api from '~/lib/api'
 import { formatBytes } from '~/lib/util'
 import { useModals } from '~/context/ModalContext'
-import { ChatMessage } from '../../../types/chat'
+import { ChatImageAttachment, ChatMessage } from '../../../types/chat'
 import classNames from '~/lib/classNames'
 import { IconMenu2, IconX } from '@tabler/icons-react'
 import { useSystemSetting } from '~/hooks/useSystemSetting'
@@ -139,6 +139,8 @@ export default function Chat({
 
   const selectedModelSupportsThinking =
     installedModels.find((m) => m.name === selectedModel)?.thinking === true
+  const selectedModelVisionCapability =
+    installedModels.find((m) => m.name === selectedModel)?.vision ?? 'unknown'
 
   // Effective thinking preference for a model: explicit override wins, else the global default.
   const effectiveThinking = useCallback(
@@ -179,6 +181,7 @@ export default function Chat({
     mutationFn: (request: {
       model: string
       messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>
+      images?: File[]
       sessionId?: number
       think?: boolean
       collection?: string
@@ -330,6 +333,7 @@ export default function Chat({
             role: m.role,
             content: m.content,
             timestamp: new Date(m.timestamp),
+            sources: m.sources,
           }))
         )
       } else {
@@ -356,7 +360,7 @@ export default function Chat({
   )
 
   const handleSendMessage = useCallback(
-    async (content: string) => {
+    async (content: string, images: ChatImageAttachment[] = []) => {
       let sessionId = activeSessionId
 
       // Create a new session if none exists
@@ -376,6 +380,7 @@ export default function Chat({
         id: `msg-${Date.now()}`,
         role: 'user',
         content,
+        images,
         timestamp: new Date(),
       }
 
@@ -409,6 +414,7 @@ export default function Chat({
               stream: true,
               sessionId: sessionId ? Number(sessionId) : undefined, think: effectiveThinking(selectedModel),
               collection: collectionFilter || undefined,
+              images: images.map((image) => image.file),
             },
             (chunkContent, chunkThinking, done) => {
               if (chunkThinking.length > 0 && thinkingStartTime === null) {
@@ -458,7 +464,12 @@ export default function Chat({
               fullContent += chunkContent
               thinkingContent += chunkThinking
             },
-            abortController.signal
+            abortController.signal,
+            (sources) => {
+              setMessages((prev) =>
+                prev.map((m) => (m.id === assistantMsgId ? { ...m, sources } : m))
+              )
+            }
           )
         } catch (error: any) {
           if (error?.name !== 'AbortError') {
@@ -472,7 +483,10 @@ export default function Chat({
                 {
                   id: assistantMsgId,
                   role: 'assistant',
-                  content: 'Sorry, there was an error processing your request. Please try again.',
+                  content:
+                    error instanceof Error
+                      ? error.message
+                      : 'Sorry, there was an error processing your request. Please try again.',
                   timestamp: new Date(),
                 },
               ]
@@ -501,6 +515,7 @@ export default function Chat({
           sessionId: sessionId ? Number(sessionId) : undefined,
           think: effectiveThinking(selectedModel),
           collection: collectionFilter || undefined,
+          images: images.map((image) => image.file),
         })
       }
     },
@@ -669,6 +684,7 @@ export default function Chat({
           <ChatInterface
             messages={messages}
             onSendMessage={handleSendMessage}
+            visionCapability={selectedModelVisionCapability}
             isLoading={isStreamingResponse || chatMutation.isPending}
             chatSuggestions={chatSuggestions}
             chatSuggestionsEnabled={suggestionsEnabled}

@@ -101,6 +101,73 @@ export const RAG_DEFAULT_TOP_K = 5
 export const RAG_DEFAULT_SCORE_THRESHOLD = 0.3
 
 /**
+ * Relevance floor applied to the post-rerank score. Chunks below it are
+ * dropped, and when nothing clears it no context block is injected at all.
+ *
+ * Retrieval used to have exactly one cutoff — RAG_DEFAULT_SCORE_THRESHOLD,
+ * applied by Qdrant to the raw cosine score. nomic scores unrelated text well
+ * above 0.3, so every question retrieved something and the system prompt was
+ * left to compensate in prose: "silently judge whether the context genuinely
+ * addresses the question". That is a relevance classification, handed to a 3B
+ * model, that a number should have decided.
+ *
+ * RAG_DEFAULT_SCORE_THRESHOLD deliberately stays low. It is the candidate net,
+ * and pruning it would starve the reranker (worth +0.0125 ndcg@5 on the golden
+ * set) and, later, the sparse leg of hybrid retrieval. This is the decisive
+ * cutoff instead, applied once at the end where the score means the most.
+ *
+ * Calibrated with `node ace eval:retrieval --min-final-score=<x>` against the
+ * 99-golden set at corpus fingerprint 51e642964facf251:
+ *
+ *     floor   recall@5   precision@5   emptyOnAnswerable   nonEmptyOnRefusal
+ *     0.00      0.991        0.221            0%                 100%
+ *     0.55      0.991        0.289            0%                  80%
+ *     0.62      0.991        0.524            0%                  60%
+ *     0.65      0.991        0.659            0%                  60%
+ *     0.66      0.991        0.695            0%                  60%
+ *     0.67      0.972        0.704            1%                  60%
+ *     0.72      0.888        0.796            6%                  60%
+ *
+ * 0.66 is the last value that costs no recall, and 0.62 is where the refusal
+ * metric reaches its floor. Everything between them buys precision only, so the
+ * default sits at 0.62 rather than at the edge: this corpus is 28 documents and
+ * a real ZIM will not score identically, and the two failure modes are not
+ * symmetric. A dropped relevant chunk means no answer to a question the corpus
+ * *can* answer; an extra irrelevant chunk means noise the model mostly ignores
+ * — measured correctness was fine at 0.221 precision. Buy margin, not precision.
+ *
+ * Note this is a higher cutoff than the same sweep supports on the *semantic*
+ * axis, where recall starts falling at 0.60. That gap is the reranker earning
+ * its place: it separates relevant from irrelevant better than raw cosine does,
+ * so the floor can sit higher without cutting real answers.
+ *
+ * Note the honest ceiling on the refusal metric: three of the five refusal
+ * goldens are tagged `adversarial` and are near-corpus by construction ("what
+ * is the TR-88 pump's warranty period?" against a corpus that documents the
+ * TR-88 but not its warranty). Retrieving that document is *correct*; declining
+ * to answer from it is the generation tier's job, scored by refusalCorrectness.
+ * So nonEmptyRateOnRefusal bottoms out at 0.6 here, and a cutoff tuned to drive
+ * it lower is cutting real documents.
+ *
+ * Unset `rag.minRelevance` resolves to this value; see app/utils/rag_relevance.ts.
+ */
+export const RAG_MIN_FINAL_SCORE = 0.62
+
+/**
+ * Preset relevance floors offered in Settings > Models, and the labels for them.
+ * The stored setting is the number, not the label, so retuning these presets
+ * later cannot invalidate a value someone has already saved.
+ */
+export const RAG_MIN_RELEVANCE_PRESETS = [
+  { value: 0, label: 'Off — use every passage retrieved' },
+  { value: 0.55, label: 'Lenient' },
+  { value: RAG_MIN_FINAL_SCORE, label: 'Balanced (recommended)' },
+  // The last floor that costs no recall on the golden set. Stricter than this
+  // starts dropping answers, which is a choice to offer, not one to default to.
+  { value: 0.66, label: 'Strict' },
+] as const
+
+/**
  * Where the per-turn retrieved-context block sits in the prompt.
  *
  * `tail` places it immediately before the current question, so
@@ -138,9 +205,11 @@ export const RAG_PLACEMENT: 'tail' | 'front' = 'tail'
  * Token cap on the query-rewrite call. A rewrite is one short sentence; the
  * prompt already asks for under 150 words. Without a cap a small model can
  * ramble, and every one of those tokens is latency the user waits through
- * before retrieval even starts.
+ * before retrieval even starts. Sized to leave room for the JSON envelope the
+ * rewrite is now grammar-constrained to emit — a truncated object parses to
+ * nothing and costs the turn its rewrite entirely.
  */
-export const QUERY_REWRITE_MAX_TOKENS = 120
+export const QUERY_REWRITE_MAX_TOKENS = 160
 
 /**
  * How long Ollama keeps a chat model — and its KV cache — resident after a
@@ -164,27 +233,24 @@ export const SYSTEM_PROMPTS = {
  - Use tables when presenting structured data.
 `,
   rag_context: (context: string) => `
-Information has been retrieved from the NOMAD knowledge base that MAY be relevant to the
-user's question. It was selected by automated similarity search, which is imperfect — some
-or all of it may be unrelated to what the user actually asked.
+Information has been retrieved from the NOMAD knowledge base for the user's question. It
+cleared a relevance filter before reaching you, so it is likely on topic — but it was
+selected by automated search, so it may still not contain the specific detail asked for.
 
 [Knowledge Base Context]
 ${context}
 
 HOW TO ANSWER:
-1. First, silently judge whether the context genuinely addresses the user's question. Use
-   it ONLY when it really contains relevant information. Do not force a connection that
-   isn't there: poetic, narrative, tangential, or topically-unrelated passages are NOT
-   relevant just because they share a word with the question — ignore them.
-2. When the context is relevant, base your answer on it and answer directly and specifically.
-3. When the context does not actually address the question, ignore it completely and answer
-   from your own general knowledge. Do this silently — do not mention the knowledge base,
-   the context, or the fact that it lacked an answer, and do not apologize.
-4. Never narrate your retrieval or reasoning process. Do not write "according to Context 1",
+1. When the context contains what was asked for, base your answer on it and answer
+   directly and specifically.
+2. When it does not, ignore it and answer from your own general knowledge. Do this
+   silently — do not mention the knowledge base, the context, or the fact that it lacked
+   an answer, and do not apologize.
+3. Never narrate your retrieval or reasoning process. Do not write "according to Context 1",
    "the context is unrelated, but", "I couldn't find specific context", or similar. Just
    give the answer as if you simply knew it.
-5. Do not fabricate specifics (numbers, names, procedures) that are neither supported by
-   genuinely relevant context nor part of your reliable knowledge.
+4. Do not fabricate specifics (numbers, names, procedures) that are neither supported by
+   the context nor part of your reliable knowledge.
 
 Format your response using markdown for readability.
 `,
@@ -206,13 +272,13 @@ Do NOT use:
 - Statements that are not suggestions themselves, such as praise for asking the question
 - Direct questions or commands to the user
 
-Return ONLY the 3 suggestions as a comma-separated list with no additional text, formatting, numbering, or quotation marks.
 The suggestions should be in title case.
-Ensure that your suggestions are comma-separated with no conjunctions like "and" or "or".
-Do not use line breaks, new lines, or extra spacing to separate the suggestions.
-Format: suggestion1, suggestion2, suggestion3
+
+Respond with JSON: {"suggestions": ["...", "...", "..."]}
 `,
-  title_generation: `You are a title generator. Given the start of a conversation, generate a concise, descriptive title under 50 characters. Return ONLY the title text with no quotes, punctuation wrapping, or extra formatting.`,
+  title_generation: `You are a title generator. Given the start of a conversation, generate a concise, descriptive title under 50 characters.
+
+Respond with JSON: {"title": "..."}`,
   query_rewrite: `
 You are a query rewriting assistant. Your task is to reformulate the user's latest question to include relevant context from the conversation history.
 
@@ -223,7 +289,7 @@ Rules:
 2. Include key entities, topics, and context from previous messages
 3. Make it a clear, searchable query
 4. Do NOT answer the question - only rewrite the user's query to be more effective for retrieval
-5. Output ONLY the rewritten query, nothing else
+5. Respond with JSON: {"queries": ["..."]} — a single rewritten query in the array
 
 Examples:
 
@@ -232,7 +298,7 @@ User: "How do I install Gentoo?"
 Assistant: [detailed installation guide]
 User: "Is an internet connection required to install?"
 
-Rewritten Query: "Is an internet connection required to install Gentoo Linux?"
+Rewritten Query: {"queries": ["Is an internet connection required to install Gentoo Linux?"]}
 
 ---
 
@@ -241,6 +307,6 @@ User: "What's the best way to preserve meat?"
 Assistant: [preservation methods]
 User: "How long does it last?"
 
-Rewritten Query: "How long does preserved meat last using curing or smoking methods?"
+Rewritten Query: {"queries": ["How long does preserved meat last using curing or smoking methods?"]}
 `,
 }

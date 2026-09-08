@@ -11,6 +11,29 @@ import { catchInternal } from './util'
 import { NomadChatResponse, NomadInstalledModel, NomadOllamaModel, OllamaChatRequest } from '../../types/ollama'
 import BenchmarkResult from '#models/benchmark_result'
 import { BenchmarkType, RunBenchmarkResponse, SubmitBenchmarkResponse, UpdateBuilderTagResponse } from '../../types/benchmark'
+import type { CreateMapMarkerPayload, MapMarkerResponse, UpdateMapMarkerPayload } from '../../types/maps'
+import type { ChatSource } from '../../types/chat'
+import { chatStreamErrorMessage } from './chat_stream.js'
+
+type OllamaChatRequestWithImages = OllamaChatRequest & { images?: File[] }
+
+function serializeChatRequest(chatRequest: OllamaChatRequestWithImages): {
+  body: BodyInit
+  headers?: Record<string, string>
+} {
+  const { images = [], ...payload } = chatRequest
+  if (images.length === 0) {
+    return {
+      body: JSON.stringify(payload),
+      headers: { 'Content-Type': 'application/json' },
+    }
+  }
+
+  const formData = new FormData()
+  formData.append('payload', JSON.stringify(payload))
+  images.forEach((image) => formData.append('images', image, image.name))
+  return { body: formData }
+}
 
 class API {
   private client: AxiosInstance
@@ -310,28 +333,45 @@ class API {
     })()
   }
 
-  async sendChatMessage(chatRequest: OllamaChatRequest) {
+  async sendChatMessage(chatRequest: OllamaChatRequestWithImages) {
     return catchInternal(async () => {
+      if (chatRequest.images?.length) {
+        const serialized = serializeChatRequest({ ...chatRequest, stream: false })
+        const response = await fetch('/api/ollama/chat', {
+          method: 'POST',
+          headers: serialized.headers,
+          body: serialized.body,
+        })
+        const responseBody = await response.json().catch(() => null)
+        if (!response.ok) {
+          throw new Error(responseBody?.message ?? `HTTP error: ${response.status}`)
+        }
+        return responseBody as NomadChatResponse
+      }
+
       const response = await this.client.post<NomadChatResponse>('/ollama/chat', chatRequest)
       return response.data
     })()
   }
 
   async streamChatMessage(
-    chatRequest: OllamaChatRequest,
+    chatRequest: OllamaChatRequestWithImages,
     onChunk: (content: string, thinking: string, done: boolean) => void,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    onSources?: (sources: ChatSource[]) => void
   ): Promise<void> {
     // Axios doesn't support ReadableStream in browser, so need to use fetch
+    const serialized = serializeChatRequest({ ...chatRequest, stream: true })
     const response = await fetch('/api/ollama/chat', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...chatRequest, stream: true }),
+      headers: serialized.headers,
+      body: serialized.body,
       signal,
     })
 
     if (!response.ok || !response.body) {
-      throw new Error(`HTTP error: ${response.status}`)
+      const errorBody = await response.json().catch(() => null)
+      throw new Error(errorBody?.message ?? `HTTP error: ${response.status}`)
     }
 
     const reader = response.body.getReader()
@@ -354,7 +394,15 @@ class API {
             data = JSON.parse(line.slice(6))
           } catch { continue /* skip malformed chunks */ }
 
-          if (data.error) throw new Error('The model encountered an error. Please try again.')
+          const streamError = chatStreamErrorMessage(data)
+          if (streamError) throw new Error(streamError)
+
+          // Citation metadata (#1179) arrives as a distinct trailing event with no
+          // `message` key -- route it separately rather than through onChunk.
+          if (data.sources) {
+            onSources?.(data.sources)
+            continue
+          }
 
           onChunk(
             data.message?.content ?? '',
@@ -755,21 +803,21 @@ class API {
 
   async listMapMarkers() {
     return catchInternal(async () => {
-      const response = await this.client.get<Array<{ id: number; name: string; longitude: number; latitude: number; color: string; notes: string | null; created_at: string }>>('/maps/markers')
+      const response = await this.client.get<MapMarkerResponse[]>('/maps/markers')
       return response.data
     })()
   }
 
-  async createMapMarker(data: { name: string; longitude: number; latitude: number; color?: string; notes?: string | null }) {
+  async createMapMarker(data: CreateMapMarkerPayload) {
     return catchInternal(async () => {
-      const response = await this.client.post<{ id: number; name: string; longitude: number; latitude: number; color: string; notes: string | null; created_at: string }>('/maps/markers', data)
+      const response = await this.client.post<MapMarkerResponse>('/maps/markers', data)
       return response.data
     })()
   }
 
-  async updateMapMarker(id: number, data: { name?: string; color?: string }) {
+  async updateMapMarker(id: number, data: UpdateMapMarkerPayload) {
     return catchInternal(async () => {
-      const response = await this.client.patch<{ id: number; name: string; longitude: number; latitude: number; color: string }>(`/maps/markers/${id}`, data)
+      const response = await this.client.patch<MapMarkerResponse>(`/maps/markers/${id}`, data)
       return response.data
     })()
   }
@@ -1078,6 +1126,47 @@ class API {
     return catchInternal(async () => {
       const response = await this.client.post<{ message: string }>('/rag/delete-collection', {
         name,
+      })
+      return response.data
+    })()
+  }
+
+  async createLinkTile(data: {
+    friendly_name: string
+    url: string
+    description?: string | null
+    icon?: string | null
+    display_order?: number
+    link_color?: string
+  }) {
+    return catchInternal(async () => {
+      const response = await this.client.post<{ success: boolean; service_name: string }>(
+        '/system/services/links',
+        data
+      )
+      return response.data
+    })()
+  }
+
+  async updateLinkTile(data: {
+    service_name: string
+    friendly_name: string
+    url: string
+    description?: string | null
+    icon?: string | null
+    display_order?: number
+    link_color?: string
+  }) {
+    return catchInternal(async () => {
+      const response = await this.client.put<{ success: boolean }>('/system/services/links', data)
+      return response.data
+    })()
+  }
+
+  async deleteLinkTile(service_name: string) {
+    return catchInternal(async () => {
+      const response = await this.client.delete<{ success: boolean }>('/system/services/links', {
+        data: { service_name },
       })
       return response.data
     })()

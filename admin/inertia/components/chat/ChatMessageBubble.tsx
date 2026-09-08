@@ -15,6 +15,18 @@ export default function ChatMessageBubble({ message }: ChatMessageBubbleProps) {
         message.role === 'user' ? 'bg-desert-green text-white' : 'bg-surface-secondary text-text-primary'
       )}
     >
+      {message.images && message.images.length > 0 && (
+        <div className="mb-3 grid grid-cols-2 gap-2">
+          {message.images.map((image) => (
+            <img
+              key={image.id}
+              src={image.previewUrl}
+              alt={image.name}
+              className="max-h-64 w-full rounded-md bg-surface-primary/20 object-contain"
+            />
+          ))}
+        </div>
+      )}
       {message.isThinking && message.thinking && (
         <div className="mb-3 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs">
           <div className="mb-1 flex items-center gap-1.5 font-medium text-amber-700">
@@ -102,6 +114,19 @@ export default function ChatMessageBubble({ message }: ChatMessageBubbleProps) {
           <span className="inline-block w-2 h-4 ml-1 bg-current animate-pulse" />
         )}
       </div>
+      {message.role === 'assistant' && message.sources && message.sources.length > 0 && (
+        <div className="mt-3 border-t border-border-subtle pt-2 text-xs text-text-primary">
+          <div className="mb-1 font-medium">Sources</div>
+          <ul className="space-y-0.5">
+            {message.sources.map((src, idx) => (
+              <li key={idx}>
+                {src.title}
+                {src.date && <span className="text-text-secondary"> ({src.date})</span>}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       <div
         className={classNames(
           'text-xs mt-2',
