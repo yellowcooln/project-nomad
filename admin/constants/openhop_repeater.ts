@@ -1,4 +1,4 @@
-export const OPENHOP_REPEATER_IMAGE = 'openhop/openhop-repeater:v1.1.2.dev220'
+export const OPENHOP_REPEATER_IMAGE = 'openhop/openhop-repeater:v1.1.4'
 export const OPENHOP_REPEATER_HOST_PORT = '8510'
 export const OPENHOP_REPEATER_CONTAINER_PORT = '8000/tcp'
 export const OPENHOP_REPEATER_USB_VOLUME = {

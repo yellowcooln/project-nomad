@@ -460,8 +460,7 @@ export default class ServiceSeeder extends BaseSeeder {
       description:
         'Self-hosted MeshCore repeater with a local web interface plus USB and TCP modem support',
       icon: 'IconAntenna',
-      // Development placeholder until the openHop image has a stable release tag. Project NOMAD's
-      // semver update checker intentionally ignores development-suffix tags.
+      // Use the approved stable release, including the in-container plugin manager.
       container_image: OPENHOP_REPEATER_IMAGE,
       source_repo: 'https://github.com/openhop-dev/openhop_repeater',
       container_command: null,

@@ -301,6 +301,10 @@ An open-source MeshCore repeater and management service with a full local web in
 
 Before enabling forwarding, verify the antenna, region, frequency, bandwidth, spreading factor, coding rate, preamble, and transmit power for the attached radio. Use `no_tx` or monitor mode while checking the connection.
 
-**Your data:** Configuration and identity material live in `storage/openhop-repeater/config`. Packet history, metrics, and other runtime data live in `storage/openhop-repeater/data`. Back up both folders together. The configuration can contain identity keys, modem tokens, and other secrets, so protect the backup like a password vault and do not post it in support logs.
+**Plugins:** The stable v1.1.4 image includes the plugin manager. Install optional plugins such as waev:outpost or NOMAD Bridge through openHop's plugin catalogue; they are not bundled with the image. Plugin packages, settings, and data persist beneath `storage/openhop-repeater/data/plugins`, so no extra mount or privileged container is required. Installing plugins and their dependencies normally requires internet access. Plugins run as trusted code with the repeater's container account.
+
+**NOMAD Bridge:** If you install this plugin, configure its `nomad_url` with a NOMAD address reachable from the openHop container, such as `http://<NOMAD-LAN-IP>:8080`, and select an installed NOMAD model. Do not use `http://127.0.0.1:8080`: that points to the openHop container, not NOMAD. Configure a dedicated openHop Companion identity/frame server for the bridge; a same-container connection can use `127.0.0.1:5001` without exposing an additional host port.
+
+**Your data:** Configuration and identity material live in `storage/openhop-repeater/config`. Packet history, metrics, plugins, and other runtime data live in `storage/openhop-repeater/data`. Back up both folders together. The configuration can contain identity keys, modem tokens, and other secrets, so protect the backup like a password vault and do not post it in support logs.
 
 **Works offline:** The repeater, web interface, local modem connection, statistics, and configuration work on the local network without internet access. Optional services you configure yourself, such as remote MQTT brokers, OIDC providers, or update checks, naturally need access to those endpoints.

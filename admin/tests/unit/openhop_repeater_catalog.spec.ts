@@ -6,8 +6,8 @@ import {
   buildOpenHopRepeaterContainerConfig,
 } from '../../constants/openhop_repeater.js'
 
-test('openHop Repeater uses the approved placeholder image', () => {
-  assert.equal(OPENHOP_REPEATER_IMAGE, 'openhop/openhop-repeater:v1.1.2.dev220')
+test('openHop Repeater uses the approved stable plugin-enabled image', () => {
+  assert.equal(OPENHOP_REPEATER_IMAGE, 'openhop/openhop-repeater:v1.1.4')
 })
 
 test('openHop Repeater container config persists data and exposes only serial USB device classes', () => {
