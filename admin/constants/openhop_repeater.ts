@@ -1,6 +1,7 @@
 export const OPENHOP_REPEATER_IMAGE = 'openhop/openhop-repeater:v1.1.4'
 export const OPENHOP_REPEATER_HOST_PORT = '8510'
 export const OPENHOP_REPEATER_CONTAINER_PORT = '8000/tcp'
+export const OPENHOP_REPEATER_COMPANION_PORT = '5001/tcp'
 export const OPENHOP_REPEATER_USB_VOLUME = {
   host_path: '/dev',
   container_path: '/host/dev',
@@ -12,6 +13,7 @@ export function buildOpenHopRepeaterContainerConfig(storageRoot: string) {
       RestartPolicy: { Name: 'unless-stopped' },
       PortBindings: {
         [OPENHOP_REPEATER_CONTAINER_PORT]: [{ HostPort: OPENHOP_REPEATER_HOST_PORT }],
+        [OPENHOP_REPEATER_COMPANION_PORT]: [{ HostPort: '5001' }],
       },
       Binds: [
         `${storageRoot}/openhop-repeater/config:/etc/openhop_repeater`,
@@ -22,6 +24,9 @@ export function buildOpenHopRepeaterContainerConfig(storageRoot: string) {
       ],
       DeviceCgroupRules: ['c 166:* rwm', 'c 188:* rwm'],
     },
-    ExposedPorts: { [OPENHOP_REPEATER_CONTAINER_PORT]: {} },
+    ExposedPorts: {
+      [OPENHOP_REPEATER_CONTAINER_PORT]: {},
+      [OPENHOP_REPEATER_COMPANION_PORT]: {},
+    },
   }
 }
