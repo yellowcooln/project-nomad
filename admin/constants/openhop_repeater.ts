@@ -13,7 +13,7 @@ export function buildOpenHopRepeaterContainerConfig(storageRoot: string) {
       RestartPolicy: { Name: 'unless-stopped' },
       PortBindings: {
         [OPENHOP_REPEATER_CONTAINER_PORT]: [{ HostPort: OPENHOP_REPEATER_HOST_PORT }],
-        [OPENHOP_REPEATER_COMPANION_PORT]: [{ HostPort: '5001' }],
+        [OPENHOP_REPEATER_COMPANION_PORT]: [{ HostPort: '8511' }],
       },
       Binds: [
         `${storageRoot}/openhop-repeater/config:/etc/openhop_repeater`,

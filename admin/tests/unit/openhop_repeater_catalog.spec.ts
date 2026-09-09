@@ -15,7 +15,7 @@ test('openHop Repeater container config persists data and exposes only serial US
 
   assert.deepEqual(config.HostConfig.PortBindings, {
     '8000/tcp': [{ HostPort: '8510' }],
-    '5001/tcp': [{ HostPort: '5001' }],
+    '5001/tcp': [{ HostPort: '8511' }],
   })
   assert.deepEqual(config.ExposedPorts, { '8000/tcp': {}, '5001/tcp': {} })
   assert.deepEqual(config.HostConfig.Binds, [
