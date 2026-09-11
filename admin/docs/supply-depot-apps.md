@@ -311,7 +311,16 @@ The plugin's default NOMAD API address (`nomad_url`) is **`http://nomad_admin:80
 
 If openHop runs on another machine or outside NOMAD's Docker network, set `nomad_url` to a reachable NOMAD address such as `http://<NOMAD-LAN-IP>:8080` instead. Do not use `http://127.0.0.1:8080`: inside openHop, that points to the openHop container, not NOMAD.
 
-Configure a dedicated openHop Companion identity/frame server for the bridge. Since the bridge and Companion run inside the same openHop container, their connection can use `127.0.0.1:5001` without exposing an additional host port. Send that Companion identity a direct message from your MeshCore radio to ask NOMAD's local AI a question and receive its reply over the mesh.
+Configure a dedicated openHop Companion identity/frame server for the bridge. Since the bridge and Companion run inside the same openHop container, their connection can use `127.0.0.1:5001` without exposing an additional host port. Before sending your first question, exchange contacts as described below.
+
+**Messaging NOMAD Bridge (DMs only):**
+
+1. **Advertise the companion you will send messages from.** In the MeshCore app, send an advert from your own companion radio so openHop Repeater can discover its contact.
+2. **Import your sending companion's contact into the bridge's companion.** In openHop Repeater, go to **Companions**, open the companion connected to NOMAD Bridge, and use **Import Contacts** to import the contact for the radio you just advertised. Import it into that specific companion, not a different companion on the repeater. The bridge's companion needs your sender's public contact to decrypt your direct messages.
+3. **Add the bridge's companion to your MeshCore app.** On the companion connected to the bridge, click the **QR** button to display its QR code. Scan that code in the MeshCore app to add the bridge's companion as a contact.
+4. **Send that contact a direct message.** Open a DM to the bridge's companion and send your question. NOMAD Bridge passes it to NOMAD's local AI and sends the answer back as a DM over the mesh.
+
+**The bridge only accepts direct messages (DMs); channel messages cannot be used to talk to it.** Repeat the advert and contact-import steps for each sending companion that needs to message the bridge.
 
 **Your data:** Configuration and identity material live in `storage/openhop-repeater/config`. Packet history, metrics, plugins, and other runtime data live in `storage/openhop-repeater/data`. Back up both folders together. The configuration can contain identity keys, modem tokens, and other secrets, so protect the backup like a password vault and do not post it in support logs.
 
