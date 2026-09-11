@@ -311,7 +311,7 @@ The plugin's default NOMAD API address (`nomad_url`) is **`http://nomad_admin:80
 
 If openHop runs on another machine or outside NOMAD's Docker network, set `nomad_url` to a reachable NOMAD address such as `http://<NOMAD-LAN-IP>:8080` instead. Do not use `http://127.0.0.1:8080`: inside openHop, that points to the openHop container, not NOMAD.
 
-Configure a dedicated openHop Companion identity/frame server for the bridge. Since the bridge and Companion run inside the same openHop container, their connection can use `127.0.0.1:5001` without exposing an additional host port. Before sending your first question, exchange contacts as described below.
+Configure a dedicated openHop Companion identity/frame server for the bridge. The first companion created in openHop uses port **`5050`** by default. Since the bridge and Companion run inside the same openHop container, configure the bridge's Companion connection with host **`127.0.0.1`** and port **`5050`** without exposing an additional host port. If you use another companion or change its listening port, use the port shown for that specific companion instead. Before sending your first question, exchange contacts as described below.
 
 **Messaging NOMAD Bridge (DMs only):**
 
