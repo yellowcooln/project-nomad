@@ -315,4 +315,4 @@ Configure a dedicated openHop Companion identity/frame server for the bridge. Si
 
 **Your data:** Configuration and identity material live in `storage/openhop-repeater/config`. Packet history, metrics, plugins, and other runtime data live in `storage/openhop-repeater/data`. Back up both folders together. The configuration can contain identity keys, modem tokens, and other secrets, so protect the backup like a password vault and do not post it in support logs.
 
-**Works offline:** The repeater, web interface, local modem connection, statistics, and configuration work on the local network without internet access. Optional services you configure yourself, such as remote MQTT brokers, OIDC providers, or update checks, naturally need access to those endpoints.
+**Works offline:** The repeater, web interface, local modem connection, statistics, and configuration work on the local network without internet access. Optional services you configure yourself, such as remote MQTT brokers or update checks, naturally need access to those endpoints.
