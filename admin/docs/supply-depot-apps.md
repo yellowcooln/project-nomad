@@ -295,9 +295,9 @@ An open-source MeshCore repeater and management service with a full local web in
 
 **Safe starting state:** The Supply Depot installation opens with the radio disabled and `no_tx` mode selected. This gives you time to finish the identity, modem, region, and radio settings before enabling mesh traffic.
 
-**Using a USB modem:** Plug the openHop Modem into the NOMAD itself, then select `pymc_usb` in openHop's radio configuration. USB serial devices are available inside the app under `/host/dev`. Prefer the stable path under `/host/dev/serial/by-id/` when your modem provides one; `/host/dev/ttyACM0` or `/host/dev/ttyUSB0` also works when that is how Linux identifies it. The normal openHop Modem USB baud rate is `921600`.
+**Using a USB modem:** Plug the openHop Modem into the NOMAD itself, then select **openHop Modem USB** in openHop's radio configuration. USB serial devices are available inside the app under `/host/dev`. Prefer the stable path under `/host/dev/serial/by-id/` when your modem provides one; `/host/dev/ttyACM0` or `/host/dev/ttyUSB0` also works when that is how Linux identifies it. The normal openHop Modem USB baud rate is `921600`.
 
-**Using a network modem:** For an openHop Modem on the same LAN, select `pymc_tcp`, enter the modem's LAN IP address, port (normally `5055`), and its token if one is configured. Prefer a reserved IP address or normal local DNS name; `.local`/mDNS names do not always resolve from inside Docker containers.
+**Using a network modem:** For an openHop Modem on the same LAN, select **openHop Modem TCP**, enter the modem's LAN IP address, port (normally `5055`), and its token if one is configured. Prefer a reserved IP address or normal local DNS name; `.local`/mDNS names do not always resolve from inside Docker containers.
 
 Before enabling forwarding, verify the antenna, region, frequency, bandwidth, spreading factor, coding rate, preamble, and transmit power for the attached radio. Use `no_tx` or monitor mode while checking the connection.
 
@@ -305,7 +305,13 @@ Before enabling forwarding, verify the antenna, region, frequency, bandwidth, sp
 
 **NOMAD AI over the mesh:** The optional [NOMAD Bridge plugin](https://github.com/openhop-dev/openhop-nomad-plugin) connects a dedicated openHop Companion identity to NOMAD's local AI assistant. MeshCore users send that identity a direct message; the plugin passes the question to NOMAD and sends the answer back over the mesh. Once the model and plugin are installed, local AI requests do not require a cloud AI service.
 
-Install **NOMAD Bridge** from openHop's plugin catalogue. Configure its `nomad_url` with a NOMAD address reachable from the openHop container, such as `http://<NOMAD-LAN-IP>:8080`, and select an installed NOMAD model. Do not use `http://127.0.0.1:8080`: that points to the openHop container, not NOMAD. Configure a dedicated openHop Companion identity/frame server for the bridge; a same-container connection can use `127.0.0.1:5001` without exposing an additional host port.
+Inside openHop, open the plugin manager and install **NOMAD Bridge** from the plugin catalogue, then enable and configure it. The bridge runs inside the openHop container; you do not need a separate bridge container.
+
+The plugin's default NOMAD API address (`nomad_url`) is **`http://nomad_admin:8080`**. NOMAD runs as a Docker app, and `nomad_admin` is its admin container's hostname on the shared Docker network. Leave this default in place for the normal NOMAD Supply Depot installation and select a model already installed in NOMAD's AI Assistant. The bridge sends requests to the **NOMAD API**, which provides access to the AI running on your NOMAD box; do not point it directly at Ollama.
+
+If openHop runs on another machine or outside NOMAD's Docker network, set `nomad_url` to a reachable NOMAD address such as `http://<NOMAD-LAN-IP>:8080` instead. Do not use `http://127.0.0.1:8080`: inside openHop, that points to the openHop container, not NOMAD.
+
+Configure a dedicated openHop Companion identity/frame server for the bridge. Since the bridge and Companion run inside the same openHop container, their connection can use `127.0.0.1:5001` without exposing an additional host port. Send that Companion identity a direct message from your MeshCore radio to ask NOMAD's local AI a question and receive its reply over the mesh.
 
 **Your data:** Configuration and identity material live in `storage/openhop-repeater/config`. Packet history, metrics, plugins, and other runtime data live in `storage/openhop-repeater/data`. Back up both folders together. The configuration can contain identity keys, modem tokens, and other secrets, so protect the backup like a password vault and do not post it in support logs.
 
